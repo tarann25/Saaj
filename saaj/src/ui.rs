@@ -1,7 +1,7 @@
 // === src/ui.rs ===
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect, Alignment},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{BarChart, Block, Borders, Gauge, List, ListItem, Paragraph},
     Frame,
@@ -11,8 +11,8 @@ use crate::theme::Theme;
 use chrono::Local;
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
-    if app.mode == AppMode::Splash {
-        draw_splash(frame);
+    if app.show_splash {
+        draw_splash(frame, app, frame.area());
         return;
     }
 
@@ -63,24 +63,67 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     draw_status_bar(frame, app, chunks[2]);
 }
 
-fn draw_splash(frame: &mut Frame) {
-    let area = frame.area();
-    let text = vec![
-        Line::from(""),
-        Line::from(Span::styled("Welcome To", Style::default().fg(Theme::MUTED))),
-        Line::from(Span::styled("SAAJ", Style::default().fg(Theme::ACCENT_BRIGHT).add_modifier(Modifier::BOLD))),
-        Line::from(""),
-        Line::from(Span::styled("Press ENTER to continue", Style::default().fg(Theme::DIM))),
+fn draw_splash(frame: &mut Frame, app: &App, area: Rect) {
+    frame.render_widget(Block::default().style(Style::default().bg(Theme::BG)), area);
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(25),  // top padding
+            Constraint::Length(10),      // title block (6 lines + margin)
+            Constraint::Length(2),       // subtitle
+            Constraint::Percentage(40),  // bottom padding
+        ])
+        .split(area);
+
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),  // centered content column
+            Constraint::Percentage(20),
+        ])
+        .split(vertical[1]);
+
+    let title_art = vec![
+        "███████╗ █████╗  █████╗      ██╗",
+        "██╔════╝██╔══██╗██╔══██╗     ██║",
+        "███████╗███████║███████║     ██║",
+        "╚════██║██╔══██║██╔══██║██   ██║",
+        "███████║██║  ██║██║  ██║╚█████╔╝",
+        "╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚════╝",
     ];
-    let p = Paragraph::new(text).alignment(Alignment::Center);
-    let y_offset = area.height / 2 - 2;
-    let centered_area = Rect {
-        x: area.x,
-        y: area.y + y_offset,
-        width: area.width,
-        height: 5,
+
+    let mut lines = vec![];
+    for (i, line) in title_art.into_iter().enumerate() {
+        let style = if app.splash_tick % 6 == i as u64 {
+            Style::default().fg(Theme::TEXT)
+        } else {
+            Style::default().fg(Theme::ACCENT_BRIGHT)
+        };
+        lines.push(Line::from(Span::styled(line, style)));
+    }
+
+    let title_p = Paragraph::new(lines).alignment(Alignment::Center);
+    frame.render_widget(title_p, horizontal[1]);
+
+    let subtitle_horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(20),
+            Constraint::Percentage(60),  // centered content column
+            Constraint::Percentage(20),
+        ])
+        .split(vertical[2]);
+
+    let subtitle_text = if app.splash_tick % 8 < 4 {
+        "a music player  ·  press enter to continue"
+    } else {
+        "a music player  ·  "
     };
-    frame.render_widget(p, centered_area);
+
+    let subtitle_p = Paragraph::new(Line::from(Span::styled(subtitle_text, Style::default().fg(Theme::MUTED)))).alignment(Alignment::Center);
+    frame.render_widget(subtitle_p, subtitle_horizontal[1]);
 }
 
 fn styled_block<'a>(title: &'a str) -> Block<'a> {
@@ -170,16 +213,33 @@ fn draw_library(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, inner_area, &mut list_state);
 }
 
-fn draw_now_playing(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_now_playing(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = styled_block("now playing");
-    let inner_area = block.inner(area);
+    let block_inner_area = block.inner(area);
     frame.render_widget(block, area);
 
     if app.tracks.is_empty() { return; }
-    
-    let track = app.current_track();
+
+    let inner = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(18), // album art (16 cols + 2 padding)
+            Constraint::Min(0),     // track info and controls
+        ])
+        .split(block_inner_area);
+
+    let track = app.current_track().clone();
+
     let mut lines = vec![];
-    
+    if let Some(ref mut protocol) = app.current_album_art {
+        let image = ratatui_image::StatefulImage::default();
+        frame.render_stateful_widget(image, inner[0], protocol);
+    } else {
+        let art_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Theme::BORDER_DIM));
+        frame.render_widget(art_block, inner[0]);
+    }
     lines.push(Line::from(Span::styled(&track.title, Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD))));
     lines.push(Line::from(Span::styled(format!("{} · {} · {}", track.artist, track.album, track.year), Style::default().fg(Theme::MUTED))));
     lines.push(Line::from(vec![
@@ -188,7 +248,7 @@ fn draw_now_playing(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(format!("[{}]", track.bitrate), Style::default().fg(Theme::MUTED)),
     ]));
     
-    lines.push(Line::from(Span::styled("─".repeat(inner_area.width as usize), Style::default().fg(Theme::BORDER_DIM))));
+    lines.push(Line::from(Span::styled("─".repeat(inner[1].width as usize), Style::default().fg(Theme::BORDER_DIM))));
     
     let p = Paragraph::new(lines).alignment(Alignment::Center);
     
@@ -201,7 +261,7 @@ fn draw_now_playing(frame: &mut Frame, app: &App, area: Rect) {
             Constraint::Min(0),    // empty space
             Constraint::Length(1), // controls
         ])
-        .split(inner_area);
+        .split(inner[1]);
         
     frame.render_widget(p, layout[0]);
     

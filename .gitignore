@@ -1,0 +1,13 @@
+.DS_Store
+Header_Files/ytdl/ffmpeg.exe
+Header_Files/ytdl/ffplay.exe
+Header_Files/ytdl/ffprobe.exe
+.gitignore
+Header_Files/ytdl/yt-dlp.exe
+Header_Files/ytdl/yt-dlp
+main.exe
+.vscode/c_cpp_properties.json
+.vscode/settings.json
+AVL.exe
+player.exe
+saaj/target/

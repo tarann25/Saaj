@@ -35,7 +35,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
 
-    // Channel for background downloads
     let (tx, rx) = mpsc::channel();
 
     loop {
@@ -53,14 +52,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if crossterm::event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
+                if app.show_splash {
+                    if key.code == KeyCode::Enter {
+                        app.show_splash = false;
+                    }
+                    continue;
+                }
+
                 match app.mode {
-                    AppMode::Splash => {
-                        if key.code == KeyCode::Enter {
-                            app.mode = AppMode::Main;
-                        } else if key.code == KeyCode::Char('q') || key.code == KeyCode::Esc {
-                            app.should_quit = true;
-                        }
-                    },
+                    AppMode::Splash => {}, // Handled by show_splash flag
                     AppMode::DownloadPrompt => {
                         match key.code {
                             KeyCode::Esc => {
@@ -88,7 +88,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     },
                     AppMode::Downloading => {
-                        // ignore inputs or allow q
                         if key.code == KeyCode::Char('q') {
                             app.should_quit = true;
                         }

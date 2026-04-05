@@ -60,12 +60,16 @@ pub struct App {
     pub download_input: String,
     pub audio_stream: Option<OutputStream>,
     pub audio_sink: Option<Sink>,
+    pub show_splash: bool,
+    pub splash_tick: u64,
+    pub image_picker: ratatui_image::picker::Picker,
+    pub current_album_art: Option<ratatui_image::protocol::StatefulProtocol>,
 }
 
 impl App {
     pub fn new() -> Self {
         let mut app = Self {
-            mode: AppMode::Splash,
+            mode: AppMode::Main, 
             tracks: vec![],
             list_state: ListState::default(),
             selected: 0,
@@ -81,10 +85,41 @@ impl App {
             download_input: String::new(),
             audio_stream: None,
             audio_sink: None,
+            show_splash: true,
+            splash_tick: 0,
+            image_picker: ratatui_image::picker::Picker::from_query_stdio().unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks()),
+            current_album_art: None,
         };
         app.init_audio();
         app.load_tracks();
+        app.update_album_art();
         app
+    }
+
+    pub fn update_album_art(&mut self) {
+        if self.tracks.is_empty() {
+            self.current_album_art = None;
+            return;
+        }
+        let track = &self.tracks[self.current_index];
+        if track.id.is_empty() {
+            self.current_album_art = None;
+            return;
+        }
+        
+        let mut file_path = format!("../audioloc/{}.webp", track.id);
+        if let Ok(img) = image::open(&file_path) {
+            let protocol = self.image_picker.new_resize_protocol(img);
+            self.current_album_art = Some(protocol);
+        } else {
+            file_path = format!("../audioloc/{}.jpg", track.id);
+            if let Ok(img) = image::open(&file_path) {
+                let protocol = self.image_picker.new_resize_protocol(img);
+                self.current_album_art = Some(protocol);
+            } else {
+                self.current_album_art = None;
+            }
+        }
     }
 
     pub fn init_audio(&mut self) {
@@ -110,7 +145,7 @@ impl App {
         if let Ok(file) = File::open(info_path) {
             let reader = BufReader::new(file);
             if let Ok(json_tracks) = serde_json::from_reader::<_, Vec<TrackJson>>(reader) {
-                self.tracks = json_tracks.into_iter().map(|t| Track {
+                self.tracks = json_tracks.into_iter().enumerate().map(|(i, t)| Track {
                     title: t.title.clone(),
                     artist: t.uploader.clone(),
                     album: "Local Download".to_string(),
@@ -135,8 +170,6 @@ impl App {
                 bitrate: "N/A".to_string(),
                 id: "".to_string(),
             });
-        } else {
-            // Validate against audioloc to ensure file exists (optional, keeping it simple)
         }
         
         if self.list_state.selected().is_none() {
@@ -221,10 +254,16 @@ impl App {
         if self.tracks.is_empty() { return; }
         let duration = self.tracks[self.current_index].duration_secs as f64;
         self.elapsed_secs = (self.elapsed_secs + secs).min(duration);
+        if let Some(sink) = &self.audio_sink {
+            let _ = sink.try_seek(std::time::Duration::from_secs_f64(self.elapsed_secs));
+        }
     }
 
     pub fn seek_backward(&mut self, secs: f64) {
         self.elapsed_secs = (self.elapsed_secs - secs).max(0.0);
+        if let Some(sink) = &self.audio_sink {
+            let _ = sink.try_seek(std::time::Duration::from_secs_f64(self.elapsed_secs));
+        }
     }
 
     pub fn volume_up(&mut self) {
@@ -255,12 +294,12 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        self.splash_tick = self.splash_tick.wrapping_add(1);
         if self.is_playing {
             if !self.tracks.is_empty() {
                 let duration = self.tracks[self.current_index].duration_secs as f64;
                 self.elapsed_secs += 0.1;
                 
-                // Track actual elapsed time from sink or just estimate it
                 if self.elapsed_secs >= duration {
                     self.elapsed_secs = duration;
                     if self.repeat == RepeatMode::One {
@@ -285,7 +324,6 @@ impl App {
     }
 }
 
-/// Background download function 
 pub fn download_song(query: String) -> bool {
     let output = Command::new("yt-dlp")
         .arg(format!("ytsearch1:{}", query))
@@ -307,7 +345,6 @@ pub fn download_song(query: String) -> bool {
         if let Ok(json_out) = json_cmd {
             let json_str = String::from_utf8_lossy(&json_out.stdout).trim().to_string();
             
-            // Handle potentially multiple lines or errors
             if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(&json_str) {
                 parsed["id"] = serde_json::Value::String(id.clone());
                 
