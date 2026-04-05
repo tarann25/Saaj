@@ -188,9 +188,13 @@ void Bass::setvolume(float v) {
 
 void Bass::showAlbumArt(){ 
     string imgPath = folder + cur->data + ".webp";
+#ifdef _WIN32
     string cmd = 
         "powershell -Command \"Import-Module Sixel; "
         "ConvertTo-Sixel -Path '" + imgPath + "'\"";
+#else
+    string cmd = "if command -v chafa >/dev/null 2>&1; then chafa -c full --symbols block -s 80x40 \"" + imgPath + "\"; else echo 'Album art hidden. Please install chafa (e.g., sudo dnf install chafa) to view it in the terminal.'; fi";
+#endif
     system(cmd.c_str());
     cout << "\n";
 }
